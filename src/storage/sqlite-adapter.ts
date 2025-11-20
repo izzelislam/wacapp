@@ -119,6 +119,8 @@ export class SQLiteStorageAdapter implements IStorageAdapter {
   }
 
   async saveMessage(sessionId: string, message: WAMessage): Promise<void> {
+    this.ensureSessionExists(sessionId);
+
     const messageId = message.key.id!;
     const jid = message.key.remoteJid!;
     const timestamp = message.messageTimestamp as number;
@@ -159,6 +161,8 @@ export class SQLiteStorageAdapter implements IStorageAdapter {
   }
 
   async saveContact(sessionId: string, contact: Contact): Promise<void> {
+    this.ensureSessionExists(sessionId);
+
     const stmt = this.db.prepare(`
       INSERT INTO contacts (id, session_id, jid, name, notify, data)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -189,6 +193,8 @@ export class SQLiteStorageAdapter implements IStorageAdapter {
   }
 
   async saveChat(sessionId: string, chat: any): Promise<void> {
+    this.ensureSessionExists(sessionId);
+
     const jid = chat.id;
     const timestamp = Date.now();
 
@@ -215,6 +221,19 @@ export class SQLiteStorageAdapter implements IStorageAdapter {
 
   async close(): Promise<void> {
     this.db.close();
+  }
+
+  /**
+   * Ensure session record exists before saving related data
+   */
+  private ensureSessionExists(sessionId: string): void {
+    const stmt = this.db.prepare(`
+      INSERT OR IGNORE INTO sessions (session_id, creds, created_at, updated_at)
+      VALUES (?, ?, ?, ?)
+    `);
+
+    const now = Date.now();
+    stmt.run(sessionId, '{}', now, now);
   }
 
   /**

@@ -15,7 +15,7 @@ Comprehensive TypeScript wrapper for [Baileys WhatsApp Web API](https://github.c
 ## Installation
 
 ```bash
-npm install wacap-wrapper
+npm i @pakor/wacap-wrapper
 ```
 
 ### Dependencies

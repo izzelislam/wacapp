@@ -1,5 +1,5 @@
 {
-  "name": "wacap-wrapper",
+  "name": "@pakor/wacap-wrapper",
   "version": "1.0.0",
   "description": "Comprehensive TypeScript wrapper for Baileys WhatsApp Web API with multi-session support",
   "main": "dist/index.js",
@@ -47,5 +47,16 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "directories": {
+    "example": "examples"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/izzelislam/wacapp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/izzelislam/wacapp/issues"
+  },
+  "homepage": "https://github.com/izzelislam/wacapp#readme"
 }

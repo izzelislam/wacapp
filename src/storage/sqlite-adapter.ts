@@ -121,28 +121,35 @@ export class SQLiteStorageAdapter implements IStorageAdapter {
   async saveMessage(sessionId: string, message: WAMessage): Promise<void> {
     this.ensureSessionExists(sessionId);
 
-    const messageId = message.key.id!;
-    const jid = message.key.remoteJid!;
-    const timestamp = message.messageTimestamp as number;
+    const messageId = String(message.key.id || "");
+    const jid = String(message.key.remoteJid || "");
+
+    // Convert timestamp Long → Number
+    const rawTs = message.messageTimestamp;
+    const timestamp =
+        typeof rawTs === "object" && rawTs?.toNumber
+        ? rawTs.toNumber()
+        : Number(rawTs) || Date.now();
+
     const fromMe = message.key.fromMe ? 1 : 0;
 
     const stmt = this.db.prepare(`
-      INSERT INTO messages (id, session_id, jid, message, timestamp, from_me)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
+        INSERT INTO messages (id, session_id, jid, message, timestamp, from_me)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
         message = excluded.message,
         timestamp = excluded.timestamp
     `);
 
     stmt.run(
-      messageId,
-      sessionId,
-      jid,
-      JSON.stringify(message),
-      timestamp,
-      fromMe
+        messageId,
+        sessionId,
+        jid,
+        JSON.stringify(message),
+        timestamp,
+        fromMe
     );
-  }
+    }
 
   async getMessages(
     sessionId: string,

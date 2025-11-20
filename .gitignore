@@ -1,0 +1,20 @@
+node_modules/
+dist/
+*.log
+.env
+*.tsbuildinfo
+coverage/
+.DS_Store
+
+# Session data
+sessions/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

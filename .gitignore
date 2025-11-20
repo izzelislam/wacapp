@@ -18,3 +18,7 @@ sessions/
 .idea/
 *.swp
 *.swo
+
+
+# Other
+n8n-workflow/*

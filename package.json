@@ -1,6 +1,6 @@
 {
   "name": "@pakor/wacap-wrapper",
-  "version": "1.0.3",
+  "version": "1.0.3-alpha.0",
   "description": "Comprehensive TypeScript wrapper for Baileys WhatsApp Web API with multi-session support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

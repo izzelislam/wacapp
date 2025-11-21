@@ -13,9 +13,16 @@ async function basicExample() {
 
   // Initialize
   await wacap.init();
+  // Restore and start any sessions found in storage automatically
+  await wacap.loadAllStoredSessions();
+
+  // Global listener (receives QR from any session)
+  wacap.onGlobal(WacapEventType.QR_CODE, (data) => {
+    console.log('[GLOBAL] QR for session', data.sessionId);
+  });
 
   // Start a session
-  const session = await wacap.sessionStart('my-session-1');
+  const session = await wacap.sessions.start('my-session-1');
 
   // Listen for QR code
   session.getEventManager().onQRCode((data) => {
@@ -36,7 +43,7 @@ async function basicExample() {
     
     // Auto-reply example
     if (data.body === '!ping' && data.from) {
-      await wacap.sendMessage('my-session-1', data.from, 'Pong! 🏓');
+      await wacap.send.text('my-session-1', data.from, 'Pong! 🏓');
     }
   });
 
@@ -57,10 +64,15 @@ async function multiSessionExample() {
   const wacap = new WacapWrapper();
   await wacap.init();
 
+  // Global example: log every incoming message from all sessions
+  wacap.onGlobal(WacapEventType.MESSAGE_RECEIVED, (data) => {
+    console.log(`[GLOBAL] [${data.sessionId}] ${data.body}`);
+  });
+
   // Start multiple sessions
-  const session1 = await wacap.sessionStart('session-1');
-  const session2 = await wacap.sessionStart('session-2');
-  const session3 = await wacap.sessionStart('session-3');
+  const session1 = await wacap.sessions.start('session-1');
+  const session2 = await wacap.sessions.start('session-2');
+  const session3 = await wacap.sessions.start('session-3');
 
   // Each session is independent
   session1.getEventManager().onMessageReceived((data) => {
@@ -82,7 +94,7 @@ async function multiSessionExample() {
   console.log('Active sessions:', allSessions.size);
 
   // Stop a session
-  await wacap.sessionStop('session-2');
+  await wacap.sessions.stop('session-2');
 
   // Delete session data
   await wacap.deleteSession('session-3');
@@ -95,7 +107,7 @@ async function sendingMessagesExample() {
   const wacap = new WacapWrapper();
   await wacap.init();
   
-  const session = await wacap.sessionStart('sender-session');
+  const session = await wacap.sessions.start('sender-session');
 
   // Wait for connection
   await new Promise((resolve) => {
@@ -103,31 +115,22 @@ async function sendingMessagesExample() {
   });
 
   // Send text message
-  await wacap.sendMessage(
-    'sender-session',
-    '6281234567890@s.whatsapp.net',
-    'Hello from Wacap! 👋'
-  );
+  await wacap.send.text('sender-session', '6281234567890@s.whatsapp.net', 'Hello from Wacap! 👋');
 
   // Send message with mentions
-  await wacap.sendMessage(
-    'sender-session',
-    '6281234567890@s.whatsapp.net',
-    'Hello @6281234567890!',
-    {
-      mentions: ['6281234567890@s.whatsapp.net'],
-    }
-  );
+  await wacap.send.text('sender-session', '6281234567890@s.whatsapp.net', 'Hello @6281234567890!', {
+    mentions: ['6281234567890@s.whatsapp.net'],
+  });
 
   // Send image
-  await wacap.sendMedia('sender-session', '6281234567890@s.whatsapp.net', {
+  await wacap.send.media('sender-session', '6281234567890@s.whatsapp.net', {
     url: 'https://example.com/image.jpg',
     mimetype: 'image/jpeg',
     caption: 'Check this out!',
   });
 
   // Send document
-  await wacap.sendMedia('sender-session', '6281234567890@s.whatsapp.net', {
+  await wacap.send.media('sender-session', '6281234567890@s.whatsapp.net', {
     url: 'https://example.com/document.pdf',
     mimetype: 'application/pdf',
     fileName: 'document.pdf',
@@ -135,7 +138,7 @@ async function sendingMessagesExample() {
   });
 
   // Send video
-  await wacap.sendMedia('sender-session', '6281234567890@s.whatsapp.net', {
+  await wacap.send.media('sender-session', '6281234567890@s.whatsapp.net', {
     buffer: Buffer.from('...'), // video buffer
     mimetype: 'video/mp4',
     caption: 'Video caption',

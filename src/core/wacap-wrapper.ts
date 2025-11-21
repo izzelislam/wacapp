@@ -8,16 +8,46 @@ import {
   EventHandler,
 } from '../types';
 import { Session } from './session';
+import { SessionRegistry } from './session-registry';
+import { EventBus } from '../events/event-bus';
 import { SQLiteStorageAdapter, PrismaStorageAdapter } from '../storage';
 import type { WASocket, proto, AnyMessageContent } from '@whiskeysockets/baileys';
+import { promises as fs } from 'fs';
 
 /**
  * Main wrapper class for managing multiple WhatsApp sessions
  */
 export class WacapWrapper {
   private config: WacapConfig;
-  private sessions: Map<string, Session> = new Map();
+  private registry: SessionRegistry;
   private storageAdapter: IStorageAdapter;
+  private globalBus: EventBus;
+  public send: {
+    text: (
+      sessionId: string,
+      jid: string,
+      text: string,
+      options?: Partial<MessageOptions>
+    ) => Promise<any>;
+    media: (
+      sessionId: string,
+      jid: string,
+      media: {
+        url?: string;
+        buffer?: Buffer;
+        mimetype?: string;
+        caption?: string;
+        fileName?: string;
+      }
+    ) => Promise<any>;
+  };
+  public sessions: {
+    start: (sessionId: string, customConfig?: Partial<WacapConfig>) => Promise<Session>;
+    stop: (sessionId: string) => Promise<void>;
+    list: () => string[];
+    info: (sessionId: string) => SessionInfo | null;
+    get: (sessionId: string) => Session | undefined;
+  };
 
   constructor(config: WacapConfig = {}) {
     this.config = {
@@ -43,6 +73,23 @@ export class WacapWrapper {
     } else {
       this.storageAdapter = new SQLiteStorageAdapter(this.config.sessionsPath);
     }
+
+    this.globalBus = new EventBus();
+    this.registry = new SessionRegistry(this.config, this.storageAdapter, this.globalBus);
+
+    // High-level helper APIs for ergonomics
+    this.send = {
+      text: this.sendMessage.bind(this),
+      media: this.sendMedia.bind(this),
+    };
+
+    this.sessions = {
+      start: this.sessionStart.bind(this),
+      stop: this.sessionStop.bind(this),
+      list: this.getSessionIds.bind(this),
+      info: this.getSessionInfo.bind(this),
+      get: this.findSession.bind(this),
+    };
   }
 
   /**
@@ -53,25 +100,60 @@ export class WacapWrapper {
   }
 
   /**
-   * Start a new session or resume existing one
-   */
-  async sessionStart(sessionId: string, customConfig?: Partial<WacapConfig>): Promise<Session> {
-    if (this.sessions.has(sessionId)) {
-      const session = this.sessions.get(sessionId)!;
-      if (session.isActive()) {
-        throw new Error(`Session ${sessionId} is already active`);
+  * Load and start all sessions stored in persistent storage.
+  * Useful for SaaS / warm-boot scenarios.
+  */
+  async loadAllStoredSessions(): Promise<string[]> {
+    const sessionIds = await this.discoverStoredSessionIds();
+    const started: string[] = [];
+
+    for (const id of sessionIds) {
+      if (this.registry.has(id)) continue;
+      try {
+        await this.sessionStart(id);
+        started.push(id);
+      } catch (error) {
+        if (this.config.debug) {
+          console.error(`[wacap] Failed to start stored session ${id}`, error);
+        }
       }
     }
 
-    const sessionConfig = {
-      ...this.config,
-      ...customConfig,
-    };
+    return started;
+  }
 
-    const session = new Session(sessionId, sessionConfig, this.storageAdapter);
-    this.sessions.set(sessionId, session);
+  private async discoverStoredSessionIds(): Promise<string[]> {
+    if (typeof this.storageAdapter.listSessions === 'function') {
+      try {
+        const ids = await this.storageAdapter.listSessions();
+        if (ids.length > 0) {
+          return ids;
+        }
+      } catch (error) {
+        if (this.config.debug) {
+          console.warn('[wacap] listSessions failed, falling back to filesystem scan', error);
+        }
+      }
+    }
 
-    await session.start();
+    try {
+      const entries = await fs.readdir(this.config.sessionsPath || './sessions', {
+        withFileTypes: true,
+      });
+      return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+    } catch (error) {
+      if (this.config.debug) {
+        console.warn('[wacap] Unable to read sessions directory', error);
+      }
+      return [];
+    }
+  }
+
+  /**
+   * Start a new session or resume existing one
+   */
+  async sessionStart(sessionId: string, customConfig?: Partial<WacapConfig>): Promise<Session> {
+    const session = await this.registry.create(sessionId, customConfig);
     return session;
   }
 
@@ -79,41 +161,35 @@ export class WacapWrapper {
    * Stop a session
    */
   async sessionStop(sessionId: string): Promise<void> {
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      throw new Error(`Session ${sessionId} not found`);
-    }
-
-    await session.stop();
-    this.sessions.delete(sessionId);
+    await this.registry.destroy(sessionId);
   }
 
   /**
    * Find and return a session
    */
   findSession(sessionId: string): Session | undefined {
-    return this.sessions.get(sessionId);
+    return this.registry.get(sessionId);
   }
 
   /**
    * Get all active sessions
    */
   getAllSessions(): Map<string, Session> {
-    return this.sessions;
+    return this.registry.all();
   }
 
   /**
    * Get all session IDs
    */
   getSessionIds(): string[] {
-    return Array.from(this.sessions.keys());
+    return this.registry.listIds();
   }
 
   /**
    * Get session info
    */
   getSessionInfo(sessionId: string): SessionInfo | null {
-    const session = this.sessions.get(sessionId);
+    const session = this.registry.get(sessionId);
     return session ? session.getInfo() : null;
   }
 
@@ -121,7 +197,7 @@ export class WacapWrapper {
    * Check if session exists
    */
   hasSession(sessionId: string): boolean {
-    return this.sessions.has(sessionId);
+    return this.registry.has(sessionId);
   }
 
   /**
@@ -129,7 +205,7 @@ export class WacapWrapper {
    */
   async deleteSession(sessionId: string): Promise<void> {
     // Stop session if active
-    if (this.sessions.has(sessionId)) {
+    if (this.registry.has(sessionId)) {
       await this.sessionStop(sessionId);
     }
 
@@ -146,7 +222,7 @@ export class WacapWrapper {
     text: string,
     options?: Partial<MessageOptions>
   ): Promise<any> {
-    const session = this.sessions.get(sessionId);
+    const session = this.registry.get(sessionId);
     if (!session) {
       throw new Error(`Session ${sessionId} not found`);
     }
@@ -190,7 +266,7 @@ export class WacapWrapper {
       fileName?: string;
     }
   ): Promise<any> {
-    const session = this.sessions.get(sessionId);
+    const session = this.registry.get(sessionId);
     if (!session) {
       throw new Error(`Session ${sessionId} not found`);
     }
@@ -228,7 +304,7 @@ export class WacapWrapper {
    * Register event handler for a session
    */
   on(sessionId: string, event: WacapEventType, handler: EventHandler): void {
-    const session = this.sessions.get(sessionId);
+    const session = this.registry.get(sessionId);
     if (!session) {
       throw new Error(`Session ${sessionId} not found`);
     }
@@ -240,7 +316,7 @@ export class WacapWrapper {
    * Register one-time event handler for a session
    */
   once(sessionId: string, event: WacapEventType, handler: EventHandler): void {
-    const session = this.sessions.get(sessionId);
+    const session = this.registry.get(sessionId);
     if (!session) {
       throw new Error(`Session ${sessionId} not found`);
     }
@@ -252,8 +328,19 @@ export class WacapWrapper {
    * Get raw socket for advanced usage
    */
   getSocket(sessionId: string): WASocket | null {
-    const session = this.sessions.get(sessionId);
+    const session = this.registry.get(sessionId);
     return session ? session.getSocket() : null;
+  }
+
+  /**
+   * Listen to events from all sessions globally.
+   */
+  onGlobal(event: WacapEventType, handler: EventHandler): void {
+    this.globalBus.on(event, handler);
+  }
+
+  onceGlobal(event: WacapEventType, handler: EventHandler): void {
+    this.globalBus.once(event, handler);
   }
 
   /**
@@ -261,11 +348,7 @@ export class WacapWrapper {
    */
   async destroy(): Promise<void> {
     // Stop all sessions
-    for (const [sessionId, session] of this.sessions) {
-      await session.stop();
-    }
-
-    this.sessions.clear();
+    await this.registry.shutdownAll();
 
     // Close storage
     await this.storageAdapter.close();

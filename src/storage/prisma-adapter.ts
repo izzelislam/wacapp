@@ -167,6 +167,14 @@ export class PrismaStorageAdapter implements IStorageAdapter {
     return chats.map((chat: any) => JSON.parse(chat.data));
   }
 
+  async listSessions(): Promise<string[]> {
+    const sessions = await this.prisma.session.findMany({
+      select: { sessionId: true },
+    });
+
+    return sessions.map((s: any) => s.sessionId);
+  }
+
   async close(): Promise<void> {
     await this.prisma.$disconnect();
   }

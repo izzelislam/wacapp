@@ -100,6 +100,22 @@ const allSessions = wacap.getAllSessions();
 await wacap.sessionStop('session-2');
 ```
 
+### Global Event Bus
+
+Subscribe sekali untuk menerima event dari SEMUA session aktif.
+
+```typescript
+// Listen for any QR code emitted by any session
+wacap.onGlobal(WacapEventType.QR_CODE, (data) => {
+  console.log('[GLOBAL] QR for', data.sessionId);
+});
+
+// Aggregate all incoming messages
+wacap.onGlobal(WacapEventType.MESSAGE_RECEIVED, (data) => {
+  console.log(`[GLOBAL][${data.sessionId}] ${data.body}`);
+});
+```
+
 ### Using Prisma Storage (MySQL/PostgreSQL)
 
 ```typescript
@@ -236,6 +252,24 @@ Register an event handler.
 ```typescript
 wacap.on('my-session', WacapEventType.MESSAGE_RECEIVED, (data) => {
   console.log(data);
+});
+```
+
+##### `onGlobal(event: WacapEventType, handler: EventHandler): void`
+Listen to an event from all sessions simultaneously.
+
+```typescript
+wacap.onGlobal(WacapEventType.CONNECTION_OPEN, (data) => {
+  console.log('Any session connected:', data.sessionId);
+});
+```
+
+##### `onceGlobal(event: WacapEventType, handler: EventHandler): void`
+One-time listener across all sessions.
+
+```typescript
+wacap.onceGlobal(WacapEventType.SESSION_START, (data) => {
+  console.log('First session started:', data.sessionId);
 });
 ```
 
@@ -430,7 +464,7 @@ Check the `examples/` directory for more comprehensive examples:
 wacap-wrapper/
 ├── src/
 │   ├── core/           # Core session management
-│   ├── events/         # Event handling
+│   ├── events/         # Event handling (per-session managers + global bus)
 │   ├── storage/        # Storage adapters
 │   ├── types/          # TypeScript types
 │   ├── utils/          # Helper utilities

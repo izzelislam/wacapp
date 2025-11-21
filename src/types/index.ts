@@ -55,29 +55,48 @@ export interface SessionConfig {
 }
 
 /**
+ * High level session lifecycle status
+ */
+export type SessionStatus =
+  | 'disconnected'
+  | 'connecting'
+  | 'qr'
+  | 'connected'
+  | 'error';
+
+/**
  * Session information
  */
 export interface SessionInfo {
   /** Session ID */
   sessionId: string;
   
-  /** Whether session is currently active */
+  /** High-level lifecycle status */
+  status: SessionStatus;
+
+  /** Whether session is currently connected */
   isActive: boolean;
-  
-  /** Connection state */
+
+  /** Connection state as reported by Baileys */
   connectionState?: ConnectionState;
-  
+
   /** Phone number (if connected) */
   phoneNumber?: string;
-  
+
   /** User name (if available) */
   userName?: string;
-  
+
   /** Session start time */
-  startedAt?: Date;
-  
+  createdAt?: Date;
+
   /** Last activity time */
-  lastActivityAt?: Date;
+  lastSeenAt?: Date;
+
+  /** Last transitioned at */
+  updatedAt?: Date;
+
+  /** Most recent error if present */
+  error?: string;
 }
 
 /**
@@ -247,6 +266,9 @@ export interface IStorageAdapter {
   /** Get chats */
   getChats(sessionId: string): Promise<any[]>;
   
+  /** List known session ids (for automatic warmup) */
+  listSessions?(): Promise<string[]>;
+
   /** Close/cleanup storage */
   close(): Promise<void>;
 }

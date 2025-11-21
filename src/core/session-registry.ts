@@ -35,8 +35,10 @@ export class SessionRegistry {
     if (this.sessions.has(sessionId)) {
       const existing = this.sessions.get(sessionId)!;
       if (existing.isActive()) {
-        throw new Error(`Session ${sessionId} already active`);
+        return existing;
       }
+      // remove inactive session before recreating it
+      this.sessions.delete(sessionId);
     }
 
     const merged: WacapConfig = { ...this.baseConfig, ...override };
@@ -58,5 +60,20 @@ export class SessionRegistry {
       await s.stop();
     }
     this.sessions.clear();
+  }
+
+  async startByIds(sessionIds: string[], override?: Partial<WacapConfig>): Promise<Session[]> {
+    const started: Session[] = [];
+    for (const id of sessionIds) {
+      const s = await this.create(id, override);
+      started.push(s);
+    }
+    return started;
+  }
+
+  async restartAll(): Promise<Session[]> {
+    const ids = this.listIds();
+    await this.shutdownAll();
+    return this.startByIds(ids);
   }
 }

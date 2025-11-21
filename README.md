@@ -4,13 +4,13 @@ Comprehensive TypeScript wrapper for [Baileys WhatsApp Web API](https://github.c
 
 ## Features
 
-✨ **Easy to Use** - Simple, intuitive API for all WhatsApp operations
-🔄 **Multi-Session Support** - Manage multiple WhatsApp connections simultaneously
-💾 **Flexible Storage** - SQLite (default) or Prisma (MySQL/PostgreSQL)
-📡 **Event Wrapper** - Simplified event handling for webhook integration
+✨ **Easy to Use** - Simple, intuitive API for sends, groups, and lifecycle
+🔄 **Multi-Session Support** - Manage hundreds of WhatsApp connections simultaneously
+💾 **Flexible Storage** - SQLite (default, WAL) or Prisma (MySQL/PostgreSQL)
+📡 **Event Wrapper** - Global + per-session events with normalized payloads
 🔒 **Type-Safe** - Full TypeScript support with comprehensive type definitions
-🎯 **Complete Baileys Features** - Access to all Baileys functionality
-📦 **Readable & Maintainable** - Clean, well-documented code
+🛡️ **SaaS Ready** - Auto-reconnect with backoff, status tracking, and session loader
+📦 **Readable & Maintainable** - Clean, modular handlers for connection/message/group flows
 
 ## Installation
 
@@ -48,8 +48,8 @@ const wacap = new WacapWrapper({
 // Initialize
 await wacap.init();
 
-// Start a session
-const session = await wacap.sessionStart('my-session');
+// Start a session (or resume if it exists)
+const session = await wacap.sessions.start('my-session');
 
 // Listen for QR code
 session.getEventManager().onQRCode((data) => {
@@ -68,18 +68,22 @@ session.getEventManager().onMessageReceived(async (data) => {
   
   // Reply
   if (data.from) {
-    await wacap.sendMessage('my-session', data.from, 'Hello!');
+    await wacap.send.text('my-session', data.from, 'Hello!');
   }
 });
+
+// Create a group and add participants
+await wacap.groups.create('my-session', 'My Team', ['628xx@s.whatsapp.net']);
+await wacap.groups.addParticipants('my-session', '12345-67890@g.us', ['628yy@s.whatsapp.net']);
 ```
 
 ### Multi-Session Support
 
 ```typescript
 // Start multiple sessions
-const session1 = await wacap.sessionStart('session-1');
-const session2 = await wacap.sessionStart('session-2');
-const session3 = await wacap.sessionStart('session-3');
+const session1 = await wacap.sessions.start('session-1');
+const session2 = await wacap.sessions.start('session-2');
+const session3 = await wacap.sessions.start('session-3');
 
 // Each session operates independently
 session1.getEventManager().onMessageReceived((data) => {
@@ -97,12 +101,17 @@ const session = wacap.findSession('session-1');
 const allSessions = wacap.getAllSessions();
 
 // Stop a session
-await wacap.sessionStop('session-2');
+await wacap.sessions.stop('session-2');
+
+// Boot all saved sessions on startup
+await wacap.sessions.startAll();
+// Or start a subset explicitly
+await wacap.sessions.startByIds(['session-1', 'session-3']);
 ```
 
 ### Global Event Bus
 
-Subscribe sekali untuk menerima event dari SEMUA session aktif.
+Subscribe once to receive events from ALL sessions.
 
 ```typescript
 // Listen for any QR code emitted by any session
@@ -114,6 +123,8 @@ wacap.onGlobal(WacapEventType.QR_CODE, (data) => {
 wacap.onGlobal(WacapEventType.MESSAGE_RECEIVED, (data) => {
   console.log(`[GLOBAL][${data.sessionId}] ${data.body}`);
 });
+
+// Every global emit auto-includes { sessionId, timestamp }
 ```
 
 ### Using Prisma Storage (MySQL/PostgreSQL)
@@ -164,87 +175,34 @@ interface WacapConfig {
 
 #### Methods
 
-##### `sessionStart(sessionId: string, customConfig?: Partial<WacapConfig>): Promise<Session>`
-Start a new session or resume existing one.
+##### Session helpers (ergonomic)
+- `sessions.start(id, config?)` – start or resume a session
+- `sessions.stop(id)` – stop one session
+- `sessions.stopAll()` – stop all active sessions
+- `sessions.restartAll()` – restart all active sessions
+- `sessions.startAll()` – load + start all sessions found in storage
+- `sessions.startByIds(ids, config?)` – start specific sessions
+- `sessions.list()` – list active session ids
+- `sessions.info(id)` – get `SessionInfo` (includes status/lastSeen/error)
+- `sessions.get(id)` – get `Session` instance
 
-```typescript
-const session = await wacap.sessionStart('my-session');
-```
+##### Send helpers
+- `send.text(sessionId, jid, text, options?)`
+- `send.media(sessionId, jid, media)`
+  - media: `{ url?: string; buffer?: Buffer; mimetype?: string; caption?: string; fileName?: string; }`
 
-##### `sessionStop(sessionId: string): Promise<void>`
-Stop an active session.
+Both throw if session/socket not ready.
 
-```typescript
-await wacap.sessionStop('my-session');
-```
+##### Group helpers
+- `groups.create(sessionId, subject, participants[])`
+- `groups.addParticipants(sessionId, groupId, participants[])`
+- `groups.removeParticipants(sessionId, groupId, participants[])`
+- `groups.promoteParticipants(sessionId, groupId, participants[])`
+- `groups.demoteParticipants(sessionId, groupId, participants[])`
 
-##### `findSession(sessionId: string): Session | undefined`
-Find and return a session.
-
-```typescript
-const session = wacap.findSession('my-session');
-```
-
-##### `getAllSessions(): Map<string, Session>`
-Get all active sessions.
-
-```typescript
-const sessions = wacap.getAllSessions();
-```
-
-##### `getSessionIds(): string[]`
-Get all session IDs.
-
-```typescript
-const ids = wacap.getSessionIds();
-```
-
-##### `hasSession(sessionId: string): boolean`
-Check if session exists.
-
-```typescript
-if (wacap.hasSession('my-session')) {
-  // Session exists
-}
-```
-
-##### `deleteSession(sessionId: string): Promise<void>`
-Delete session data from storage.
-
-```typescript
-await wacap.deleteSession('my-session');
-```
-
-##### `sendMessage(sessionId: string, jid: string, text: string, options?): Promise<WAMessage>`
-Send a text message.
-
-```typescript
-await wacap.sendMessage('my-session', '6281234567890@s.whatsapp.net', 'Hello!');
-
-// With mentions
-await wacap.sendMessage('my-session', jid, 'Hello @user!', {
-  mentions: ['6281234567890@s.whatsapp.net']
-});
-```
-
-##### `sendMedia(sessionId: string, jid: string, media): Promise<WAMessage>`
-Send media (image, video, audio, document).
-
-```typescript
-// Send image
-await wacap.sendMedia('my-session', jid, {
-  url: 'https://example.com/image.jpg',
-  mimetype: 'image/jpeg',
-  caption: 'Check this out!'
-});
-
-// Send document
-await wacap.sendMedia('my-session', jid, {
-  buffer: fileBuffer,
-  mimetype: 'application/pdf',
-  fileName: 'document.pdf'
-});
-```
+##### Legacy (still available)
+- `sessionStart`, `sessionStop`, `findSession`, `getAllSessions`, `getSessionIds`, `hasSession`, `deleteSession`
+- `sendMessage`, `sendMedia`
 
 ##### `on(sessionId: string, event: WacapEventType, handler: EventHandler): void`
 Register an event handler.
@@ -304,8 +262,9 @@ Get session information.
 
 ```typescript
 const info = session.getInfo();
-console.log(info.phoneNumber);
-console.log(info.isActive);
+console.log(info.status);      // 'connecting' | 'qr' | 'connected' | 'disconnected' | 'error'
+console.log(info.lastSeenAt);  // timestamp of last activity
+console.log(info.error);       // last error message if any
 ```
 
 ##### `isActive(): boolean`
@@ -343,7 +302,7 @@ eventManager.once(WacapEventType.CONNECTION_OPEN, handler);
 eventManager.off(WacapEventType.MESSAGE_RECEIVED, handler);
 ```
 
-### Event Types
+### Event Types (normalized payload)
 
 ```typescript
 enum WacapEventType {
@@ -382,6 +341,8 @@ enum WacapEventType {
   SESSION_ERROR = 'session.error',
 }
 ```
+
+All emitted events include `{ sessionId, timestamp, ...data }` so listeners always know the origin session.
 
 ## Webhook Integration
 
@@ -441,6 +402,7 @@ Check the `examples/` directory for more comprehensive examples:
 
 - `basic-usage.ts` - Basic usage with SQLite
 - `prisma-usage.ts` - Using Prisma with MySQL/PostgreSQL
+- `complete-features.ts` - Full demo of events, sending, and Baileys extras
 
 ## Storage
 
@@ -450,6 +412,8 @@ Check the `examples/` directory for more comprehensive examples:
 - ✅ File-based storage
 - ✅ Perfect for small to medium deployments
 - ✅ Automatic setup
+- ⚠️ Uses WAL mode to reduce corruption; avoid sharing the same db file across multi-process clusters unless you understand the risk.
+- Stores metadata (timestamps) and chats/messages/contacts; auth keys stay on disk via Baileys multi-file auth.
 
 ### Prisma (MySQL/PostgreSQL)
 

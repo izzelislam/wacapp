@@ -11,8 +11,15 @@ import { Session } from './session';
 import { SessionRegistry } from './session-registry';
 import { EventBus } from '../events/event-bus';
 import { SQLiteStorageAdapter, PrismaStorageAdapter } from '../storage';
-import type { WASocket, proto, AnyMessageContent } from '@whiskeysockets/baileys';
+import type { WASocket } from '@whiskeysockets/baileys';
 import { promises as fs } from 'fs';
+import {
+  sendText,
+  sendMedia,
+  createGroup,
+  updateGroupParticipants,
+  getSessionOrThrow,
+} from '../handlers/wrapper.helpers';
 
 /**
  * Main wrapper class for managing multiple WhatsApp sessions
@@ -41,9 +48,20 @@ export class WacapWrapper {
       }
     ) => Promise<any>;
   };
+  public groups: {
+    create: (sessionId: string, subject: string, participants: string[]) => Promise<any>;
+    addParticipants: (sessionId: string, groupId: string, participants: string[]) => Promise<any>;
+    removeParticipants: (sessionId: string, groupId: string, participants: string[]) => Promise<any>;
+    promoteParticipants: (sessionId: string, groupId: string, participants: string[]) => Promise<any>;
+    demoteParticipants: (sessionId: string, groupId: string, participants: string[]) => Promise<any>;
+  };
   public sessions: {
     start: (sessionId: string, customConfig?: Partial<WacapConfig>) => Promise<Session>;
     stop: (sessionId: string) => Promise<void>;
+    stopAll: () => Promise<void>;
+    restartAll: () => Promise<Session[]>;
+    startAll: () => Promise<string[]>;
+    startByIds: (ids: string[], customConfig?: Partial<WacapConfig>) => Promise<Session[]>;
     list: () => string[];
     info: (sessionId: string) => SessionInfo | null;
     get: (sessionId: string) => Session | undefined;
@@ -86,9 +104,26 @@ export class WacapWrapper {
     this.sessions = {
       start: this.sessionStart.bind(this),
       stop: this.sessionStop.bind(this),
+      stopAll: this.stopAllSessions.bind(this),
+      restartAll: this.restartAllSessions.bind(this),
+      startAll: this.startAllSessions.bind(this),
+      startByIds: this.startByIds.bind(this),
       list: this.getSessionIds.bind(this),
       info: this.getSessionInfo.bind(this),
       get: this.findSession.bind(this),
+    };
+
+    this.groups = {
+      create: (sessionId, subject, participants) =>
+        createGroup(this.registry, sessionId, subject, participants),
+      addParticipants: (sessionId, groupId, participants) =>
+        updateGroupParticipants(this.registry, sessionId, groupId, participants, 'add'),
+      removeParticipants: (sessionId, groupId, participants) =>
+        updateGroupParticipants(this.registry, sessionId, groupId, participants, 'remove'),
+      promoteParticipants: (sessionId, groupId, participants) =>
+        updateGroupParticipants(this.registry, sessionId, groupId, participants, 'promote'),
+      demoteParticipants: (sessionId, groupId, participants) =>
+        updateGroupParticipants(this.registry, sessionId, groupId, participants, 'demote'),
     };
   }
 
@@ -100,9 +135,9 @@ export class WacapWrapper {
   }
 
   /**
-  * Load and start all sessions stored in persistent storage.
-  * Useful for SaaS / warm-boot scenarios.
-  */
+   * Load and start all sessions stored in persistent storage.
+   * Useful for SaaS / warm-boot scenarios.
+   */
   async loadAllStoredSessions(): Promise<string[]> {
     const sessionIds = await this.discoverStoredSessionIds();
     const started: string[] = [];
@@ -120,6 +155,34 @@ export class WacapWrapper {
     }
 
     return started;
+  }
+
+  /**
+   * Start all sessions discovered in storage (alias for loadAllStoredSessions)
+   */
+  async startAllSessions(): Promise<string[]> {
+    return this.loadAllStoredSessions();
+  }
+
+  /**
+   * Start several sessions by id list
+   */
+  async startByIds(ids: string[], customConfig?: Partial<WacapConfig>): Promise<Session[]> {
+    return this.registry.startByIds(ids, customConfig);
+  }
+
+  /**
+   * Stop all active sessions
+   */
+  async stopAllSessions(): Promise<void> {
+    await this.registry.shutdownAll();
+  }
+
+  /**
+   * Restart all currently known sessions
+   */
+  async restartAllSessions(): Promise<Session[]> {
+    return this.registry.restartAll();
   }
 
   private async discoverStoredSessionIds(): Promise<string[]> {
@@ -222,34 +285,7 @@ export class WacapWrapper {
     text: string,
     options?: Partial<MessageOptions>
   ): Promise<any> {
-    const session = this.registry.get(sessionId);
-    if (!session) {
-      throw new Error(`Session ${sessionId} not found`);
-    }
-
-    const socket = session.getSocket();
-    if (!socket) {
-      throw new Error(`Session ${sessionId} is not connected`);
-    }
-
-    const message: AnyMessageContent = {
-      text,
-    };
-
-    if (options?.quoted) {
-      return await socket.sendMessage(jid, message, {
-        quoted: options.quoted,
-      });
-    }
-
-    if (options?.mentions) {
-      return await socket.sendMessage(jid, {
-        text,
-        mentions: options.mentions,
-      });
-    }
-
-    return await socket.sendMessage(jid, message);
+    return sendText(this.registry, sessionId, jid, text, options);
   }
 
   /**
@@ -266,38 +302,7 @@ export class WacapWrapper {
       fileName?: string;
     }
   ): Promise<any> {
-    const session = this.registry.get(sessionId);
-    if (!session) {
-      throw new Error(`Session ${sessionId} not found`);
-    }
-
-    const socket = session.getSocket();
-    if (!socket) {
-      throw new Error(`Session ${sessionId} is not connected`);
-    }
-
-    const content: any = {};
-
-    // Determine media type from mimetype
-    const mimetype = media.mimetype || '';
-    
-    if (mimetype.startsWith('image/')) {
-      content.image = media.url || media.buffer;
-      if (media.caption) content.caption = media.caption;
-    } else if (mimetype.startsWith('video/')) {
-      content.video = media.url || media.buffer;
-      if (media.caption) content.caption = media.caption;
-    } else if (mimetype.startsWith('audio/')) {
-      content.audio = media.url || media.buffer;
-      content.mimetype = mimetype;
-    } else {
-      content.document = media.url || media.buffer;
-      content.mimetype = mimetype;
-      if (media.fileName) content.fileName = media.fileName;
-      if (media.caption) content.caption = media.caption;
-    }
-
-    return await socket.sendMessage(jid, content);
+    return sendMedia(this.registry, sessionId, jid, media);
   }
 
   /**

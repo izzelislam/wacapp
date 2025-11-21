@@ -1,24 +1,16 @@
 import makeWASocket, {
-  DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
   WASocket,
-  proto,
-  downloadMediaMessage,
-  getAggregateVotesInPollMessage,
   delay,
-  BaileysEventMap,
 } from '@whiskeysockets/baileys';
-import { Boom } from '@hapi/boom';
 import pino from 'pino';
-import qrcode from 'qrcode-terminal';
 import { join } from 'path';
 import { existsSync, mkdirSync, rmSync } from 'fs';
 import {
   WacapConfig,
   SessionInfo,
-  MessageOptions,
   WacapEventType,
   IStorageAdapter,
   IWASocket,
@@ -26,6 +18,15 @@ import {
 } from '../types';
 import { EventManager } from '../events';
 import { EventBus } from '../events/event-bus';
+import {
+  registerConnectionHandlers,
+  registerMessageHandlers,
+  registerGroupHandlers,
+  registerTypingHandlers,
+  registerContactHandlers,
+  registerProfileHandlers,
+  registerCallHandlers,
+} from '../handlers';
 
 /**
  * WhatsApp session manager
@@ -40,6 +41,7 @@ export class Session {
   private sessionPath: string;
   private isConnecting: boolean = false;
   private shouldReconnect: boolean = true;
+  private reconnecting: boolean = false;
   private retryCount: number = 0;
   private createdAt: Date = new Date();
   private startedAt: Date | undefined;
@@ -48,6 +50,7 @@ export class Session {
   private status: SessionStatus = 'disconnected';
   private lastError?: string;
   private globalBus: EventBus;
+  private persistCreds?: () => Promise<void>;
 
   constructor(
     sessionId: string,
@@ -106,7 +109,7 @@ export class Session {
    * Connect to WhatsApp
    */
   private async connect(): Promise<void> {
-    if (this.isConnecting) return;
+    if (this.isConnecting || this.reconnecting) return;
     this.isConnecting = true;
     this.updateStatus('connecting');
 
@@ -117,11 +120,17 @@ export class Session {
     // Load auth state
     try {
       const { state, saveCreds } = await useMultiFileAuthState(this.sessionPath);
-      await this.storageAdapter.saveSession(this.sessionId, state.creds);
+      // Persist lightweight metadata to storage without double-serializing creds
+      await this.storageAdapter.saveSession(this.sessionId, {
+        updatedAt: Date.now(),
+      });
       const persistCreds = async () => {
         await saveCreds();
-        await this.storageAdapter.saveSession(this.sessionId, state.creds);
+        await this.storageAdapter.saveSession(this.sessionId, {
+          updatedAt: Date.now(),
+        });
       };
+      this.persistCreds = persistCreds;
 
       // Get latest version
       const { version } = await fetchLatestBaileysVersion();
@@ -144,7 +153,7 @@ export class Session {
       this.socket.sessionId = this.sessionId;
 
       // Setup event handlers
-      this.setupEventHandlers(persistCreds);
+      this.setupEventHandlers();
 
       this.startedAt = this.startedAt || new Date();
       this.touchActivity();
@@ -163,200 +172,34 @@ export class Session {
   /**
    * Setup event handlers for the socket
    */
-  private setupEventHandlers(persistCreds: () => Promise<void>): void {
+  private setupEventHandlers(): void {
     if (!this.socket) return;
 
-    // Connection updates
-    this.socket.ev.on('connection.update', async (update) => {
-      const { connection, lastDisconnect, qr } = update;
-
-      this.emitBoth(WacapEventType.CONNECTION_UPDATE, {
-        sessionId: this.sessionId,
-        timestamp: new Date(),
-        state: update as any,
-        qr,
-      });
-
-      // Handle QR code
-      if (qr) {
-        this.updateStatus('qr');
-        if (this.config.autoDisplayQR) {
-          console.log(`\n[${this.sessionId}] Scan this QR code to login:\n`);
-          qrcode.generate(qr, { small: true });
-        }
-
-        this.emitBoth(WacapEventType.QR_CODE, {
-          sessionId: this.sessionId,
-          timestamp: new Date(),
-          state: update as any,
-          qr,
-        });
-      }
-
-      // Handle connection open
-      if (connection === 'open') {
-        console.log(`[${this.sessionId}] Connection opened successfully`);
+    const ctx = {
+      sessionId: this.sessionId,
+      socket: this.socket,
+      config: this.config,
+      storageAdapter: this.storageAdapter,
+      emit: (event: WacapEventType, data: Record<string, any>) => this.emitBoth(event, data),
+      touchActivity: () => this.touchActivity(),
+      updateStatus: (status: SessionStatus, error?: unknown) => this.updateStatus(status, error),
+      handleReconnect: (error?: unknown) => this.handleReconnect(error),
+      handleLoggedOut: (error?: unknown) => this.handleLoggedOut(error),
+      resetRetry: () => {
         this.retryCount = 0;
-        this.updateStatus('connected');
-        this.touchActivity();
+      },
+      setSocket: (socket: (WASocket & { sessionId: string }) | null) => {
+        this.socket = socket;
+      },
+    };
 
-        this.emitBoth(WacapEventType.CONNECTION_OPEN, {
-          sessionId: this.sessionId,
-          timestamp: new Date(),
-          state: update as any,
-        });
-      }
-
-      // Handle disconnection
-      if (connection === 'close') {
-        const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
-        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-        this.socket = null;
-        this.updateStatus(isLoggedOut ? 'disconnected' : 'connecting', lastDisconnect?.error);
-        
-        console.log(
-          `[${this.sessionId}] Connection closed. Reconnecting: ${shouldReconnect}`
-        );
-
-        this.emitBoth(WacapEventType.CONNECTION_CLOSE, {
-          sessionId: this.sessionId,
-          timestamp: new Date(),
-          state: update as any,
-          error: lastDisconnect?.error,
-        });
-
-        if (isLoggedOut) {
-          await this.handleLoggedOut(lastDisconnect?.error);
-          return;
-        }
-
-        if (shouldReconnect && this.shouldReconnect) {
-          await this.handleReconnect(lastDisconnect?.error);
-        }
-      }
-    });
-
-    // Credentials update
-    this.socket.ev.on('creds.update', persistCreds);
-
-    // Messages
-    this.socket.ev.on('messages.upsert', async ({ messages, type }) => {
-      for (const message of messages) {
-        this.touchActivity();
-        // Save message to storage
-        await this.storageAdapter.saveMessage(this.sessionId, message);
-
-        // Emit message event
-        const eventData = {
-          sessionId: this.sessionId,
-          timestamp: new Date(),
-          message,
-          isFromMe: message.key.fromMe,
-          messageType: Object.keys(message.message || {})[0],
-          body: this.getMessageBody(message),
-          from: message.key.remoteJid,
-        };
-
-        if (message.key.fromMe) {
-          this.emitBoth(WacapEventType.MESSAGE_SENT, eventData);
-        } else {
-          this.emitBoth(WacapEventType.MESSAGE_RECEIVED, eventData);
-        }
-      }
-    });
-
-    // Message updates
-    this.socket.ev.on('messages.update', async (updates) => {
-      for (const update of updates) {
-        this.touchActivity();
-        this.emitBoth(WacapEventType.MESSAGE_UPDATE, {
-          sessionId: this.sessionId,
-          timestamp: new Date(),
-          message: update as any,
-        });
-      }
-    });
-
-    // Message deletes
-    this.socket.ev.on('messages.delete', async (item) => {
-      this.touchActivity();
-      this.emitBoth(WacapEventType.MESSAGE_DELETE, {
-        sessionId: this.sessionId,
-        timestamp: new Date(),
-      });
-    });
-
-    // Contacts
-    this.socket.ev.on('contacts.update', async (updates) => {
-      for (const contact of updates) {
-        if (contact.id) {
-          await this.storageAdapter.saveContact(this.sessionId, contact as any);
-        }
-      }
-
-      this.touchActivity();
-
-      this.emitBoth(WacapEventType.CONTACT_UPDATE, {
-        sessionId: this.sessionId,
-        timestamp: new Date(),
-      });
-    });
-
-    // Chats
-    this.socket.ev.on('chats.upsert', async (chats) => {
-      for (const chat of chats) {
-        await this.storageAdapter.saveChat(this.sessionId, chat);
-      }
-
-      this.touchActivity();
-      this.emitBoth(WacapEventType.CHAT_UPDATE, {
-        sessionId: this.sessionId,
-        timestamp: new Date(),
-      });
-    });
-
-    // Groups
-    this.socket.ev.on('groups.update', async (updates) => {
-      this.touchActivity();
-      this.emitBoth(WacapEventType.GROUP_UPDATE, {
-        sessionId: this.sessionId,
-        timestamp: new Date(),
-      });
-    });
-
-    // Group participants
-    this.socket.ev.on('group-participants.update', async (update) => {
-      this.touchActivity();
-      this.emitBoth(WacapEventType.GROUP_PARTICIPANTS_UPDATE, {
-        sessionId: this.sessionId,
-        timestamp: new Date(),
-        groupId: update.id,
-        participants: update.participants.map(p => typeof p === 'string' ? p : p.id),
-        action: update.action as any,
-        author: update.author,
-      });
-    });
-
-    // Presence
-    this.socket.ev.on('presence.update', async (update) => {
-      this.touchActivity();
-      this.emitBoth(WacapEventType.PRESENCE_UPDATE, {
-        sessionId: this.sessionId,
-        timestamp: new Date(),
-        jid: update.id,
-        presences: update.presences as any,
-      });
-    });
-
-    // Calls
-    this.socket.ev.on('call', async (calls) => {
-      this.touchActivity();
-      this.emitBoth(WacapEventType.CALL, {
-        sessionId: this.sessionId,
-        timestamp: new Date(),
-      });
-    });
+    registerConnectionHandlers(ctx, this.persistCreds || (async () => {}));
+    registerMessageHandlers(ctx);
+    registerGroupHandlers(ctx);
+    registerTypingHandlers(ctx);
+    registerContactHandlers(ctx);
+    registerProfileHandlers();
+    registerCallHandlers(ctx);
   }
 
   /**
@@ -385,24 +228,26 @@ export class Session {
    * Handle reconnect attempts with retry budget
    */
   private async handleReconnect(error?: unknown): Promise<void> {
-    if (!this.shouldReconnect) return;
+    if (!this.shouldReconnect || this.reconnecting) return;
+    this.reconnecting = true;
 
     if (this.retryCount < this.config.maxRetries) {
       this.retryCount++;
+      const backoffMs = Math.min(30000, 2000 * Math.pow(2, this.retryCount - 1));
       console.log(
-        `[${this.sessionId}] Reconnecting... (Attempt ${this.retryCount}/${this.config.maxRetries})`
+        `[${this.sessionId}] Reconnecting... (Attempt ${this.retryCount}/${this.config.maxRetries}) in ${backoffMs}ms`
       );
-      
-      await delay(3000); // Wait 3 seconds before reconnecting
+
+      await delay(backoffMs);
+      this.cleanupSocketListeners();
+      this.socket = null;
+      this.reconnecting = false;
       await this.connect();
     } else {
-      console.error(
-        `[${this.sessionId}] Max retry attempts reached. Stopping session.`
-      );
+      console.error(`[${this.sessionId}] Max retry attempts reached. Stopping session.`);
+      this.reconnecting = false;
       this.updateStatus('error', error);
       this.emitBoth(WacapEventType.SESSION_ERROR, {
-        sessionId: this.sessionId,
-        timestamp: new Date(),
         error: new Error('Max retry attempts reached'),
       });
     }
@@ -414,14 +259,14 @@ export class Session {
   private async handleLoggedOut(error?: unknown): Promise<void> {
     this.updateStatus('disconnected', error);
     this.retryCount = 0;
+    this.cleanupSocketListeners();
+    this.socket = null;
     this.resetAuthState();
 
     if (!this.shouldReconnect) return;
 
     console.log(`[${this.sessionId}] Session logged out. Resetting auth and waiting for new QR.`);
     this.emitBoth(WacapEventType.SESSION_ERROR, {
-      sessionId: this.sessionId,
-      timestamp: new Date(),
       error: error || new Error('Logged out'),
     });
 
@@ -442,23 +287,6 @@ export class Session {
   }
 
   /**
-   * Extract message body text
-   */
-  private getMessageBody(message: proto.IWebMessageInfo): string | undefined {
-    const messageContent = message.message;
-    if (!messageContent) return undefined;
-
-    return (
-      messageContent.conversation ||
-      messageContent.extendedTextMessage?.text ||
-      messageContent.imageMessage?.caption ||
-      messageContent.videoMessage?.caption ||
-      messageContent.documentMessage?.caption ||
-      undefined
-    );
-  }
-
-  /**
    * Stop the session
    */
   async stop(): Promise<void> {
@@ -466,6 +294,7 @@ export class Session {
     this.retryCount = 0;
 
     if (this.socket) {
+      this.cleanupSocketListeners();
       await this.socket.logout();
       this.socket = null;
     }
@@ -525,7 +354,29 @@ export class Session {
    * Emit to local event manager and global bus
    */
   private emitBoth(event: WacapEventType, data: any): void {
-    this.eventManager.emit(event, data);
-    this.globalBus.emit(event, data);
+    const base = {
+      sessionId: this.sessionId,
+      timestamp: data?.timestamp || new Date(),
+    };
+
+    const payload = { ...base, ...data };
+    this.eventManager.emit(event, payload);
+    this.globalBus.emit(event, payload);
+  }
+
+  /**
+   * Clean up event listeners on the current socket to avoid leaks
+   */
+  private cleanupSocketListeners(): void {
+    if (this.socket) {
+      try {
+        // Baileys event emitter allows removing all listeners without args
+        (this.socket.ev as any).removeAllListeners();
+      } catch (err) {
+        if (this.config.debug) {
+          console.warn(`[${this.sessionId}] Failed cleanup listeners`, err);
+        }
+      }
+    }
   }
 }

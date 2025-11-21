@@ -444,6 +444,12 @@ wacap-wrapper/
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+## Support
+
+If you find this project useful, consider supporting us and starring the repository!
+
+[<img src="https://www.owlstown.com/assets/icons/bmc-yellow-button-941f96a1.png" alt="Buy Me A Coffee" width="150" />](https://www.buymeacoffee.com/pakor)
+
 ## License
 
 MIT License - see LICENSE file for details
@@ -455,3 +461,5 @@ Built on top of the amazing [Baileys](https://github.com/WhiskeySockets/Baileys)
 ## Disclaimer
 
 This project is not affiliated with WhatsApp or Meta. Use at your own risk and in accordance with WhatsApp's Terms of Service.
+
+---

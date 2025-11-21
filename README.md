@@ -2,6 +2,8 @@
 
 Comprehensive TypeScript wrapper for [Baileys WhatsApp Web API](https://github.com/WhiskeySockets/Baileys) with multi-session support, flexible storage options, and easy-to-use event handling.
 
+[<img src="https://www.owlstown.com/assets/icons/bmc-yellow-button-941f96a1.png" alt="Buy Me A Coffee" width="150" />](https://www.buymeacoffee.com/pakor)
+
 ## Features
 
 ✨ **Easy to Use** - Simple, intuitive API for sends, groups, and lifecycle

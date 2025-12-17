@@ -10,6 +10,31 @@ import type {
 } from '@whiskeysockets/baileys';
 
 /**
+ * QR Code format options
+ */
+export type QRFormat = 'terminal' | 'base64' | 'raw' | 'all';
+
+/**
+ * QR Code configuration
+ */
+export interface QRConfig {
+  /** Format output QR: 'terminal' | 'base64' | 'raw' | 'all' (default: 'terminal') */
+  format?: QRFormat;
+  
+  /** Width of QR image in pixels (for base64, default: 300) */
+  width?: number;
+  
+  /** Margin around QR code (default: 2) */
+  margin?: number;
+  
+  /** Dark color (default: '#000000') */
+  darkColor?: string;
+  
+  /** Light color (default: '#ffffff') */
+  lightColor?: string;
+}
+
+/**
  * Configuration options for the WhatsApp wrapper
  */
 export interface WacapConfig {
@@ -30,8 +55,11 @@ export interface WacapConfig {
   /** Custom Prisma client instance (only if storageAdapter is 'prisma') */
   prismaClient?: any;
   
-  /** Automatically handle QR code display */
+  /** Automatically handle QR code display (deprecated, use qrCode.format instead) */
   autoDisplayQR?: boolean;
+  
+  /** QR Code configuration */
+  qrCode?: QRConfig;
   
   /** Browser configuration */
   browser?: [string, string, string];
@@ -55,29 +83,48 @@ export interface SessionConfig {
 }
 
 /**
+ * High level session lifecycle status
+ */
+export type SessionStatus =
+  | 'disconnected'
+  | 'connecting'
+  | 'qr'
+  | 'connected'
+  | 'error';
+
+/**
  * Session information
  */
 export interface SessionInfo {
   /** Session ID */
   sessionId: string;
   
-  /** Whether session is currently active */
+  /** High-level lifecycle status */
+  status: SessionStatus;
+
+  /** Whether session is currently connected */
   isActive: boolean;
-  
-  /** Connection state */
+
+  /** Connection state as reported by Baileys */
   connectionState?: ConnectionState;
-  
+
   /** Phone number (if connected) */
   phoneNumber?: string;
-  
+
   /** User name (if available) */
   userName?: string;
-  
+
   /** Session start time */
-  startedAt?: Date;
-  
+  createdAt?: Date;
+
   /** Last activity time */
-  lastActivityAt?: Date;
+  lastSeenAt?: Date;
+
+  /** Last transitioned at */
+  updatedAt?: Date;
+
+  /** Most recent error if present */
+  error?: string;
 }
 
 /**
@@ -162,6 +209,7 @@ export interface BaseEventData {
 export interface ConnectionEventData extends BaseEventData {
   state: ConnectionState;
   qr?: string;
+  qrBase64?: string;
   error?: any;
 }
 
@@ -247,6 +295,9 @@ export interface IStorageAdapter {
   /** Get chats */
   getChats(sessionId: string): Promise<any[]>;
   
+  /** List known session ids (for automatic warmup) */
+  listSessions?(): Promise<string[]>;
+
   /** Close/cleanup storage */
   close(): Promise<void>;
 }

@@ -4,9 +4,14 @@ export { Session } from './core/session';
 
 // Event management
 export { EventManager } from './events/event-manager';
+export { EventBus } from './events/event-bus';
+export { SessionRegistry } from './core/session-registry';
 
 // Storage adapters
 export { SQLiteStorageAdapter, PrismaStorageAdapter } from './storage';
+
+// Utilities
+export { formatJid, formatJids } from './handlers/wrapper.helpers';
 
 // Types
 export * from './types';

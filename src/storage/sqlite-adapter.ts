@@ -22,6 +22,10 @@ export class SQLiteStorageAdapter implements IStorageAdapter {
   }
 
   async init(): Promise<void> {
+    // Enable WAL mode to reduce corruption risk when accessed concurrently
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('synchronous = NORMAL');
+
     // Create sessions table
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
@@ -228,6 +232,12 @@ export class SQLiteStorageAdapter implements IStorageAdapter {
 
   async close(): Promise<void> {
     this.db.close();
+  }
+
+  async listSessions(): Promise<string[]> {
+    const stmt = this.db.prepare(`SELECT session_id FROM sessions`);
+    const rows = stmt.all() as { session_id: string }[];
+    return rows.map(r => r.session_id);
   }
 
   /**

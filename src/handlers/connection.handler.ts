@@ -1,8 +1,31 @@
 import { DisconnectReason } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
-import qrcode from 'qrcode-terminal';
-import { WacapEventType } from '../types';
+import qrcodeTerminal from 'qrcode-terminal';
+import QRCode from 'qrcode';
+import { WacapEventType, QRFormat } from '../types';
 import { HandlerContext } from './index';
+
+/**
+ * Generate QR code as base64 data URL
+ */
+async function generateQRBase64(
+  qr: string,
+  options: { width?: number; margin?: number; darkColor?: string; lightColor?: string }
+): Promise<string> {
+  try {
+    return await QRCode.toDataURL(qr, {
+      width: options.width || 300,
+      margin: options.margin || 2,
+      color: {
+        dark: options.darkColor || '#000000',
+        light: options.lightColor || '#ffffff',
+      },
+    });
+  } catch (error) {
+    console.error('Failed to generate QR base64:', error);
+    return '';
+  }
+}
 
 export function registerConnectionHandlers(
   ctx: HandlerContext,
@@ -31,14 +54,32 @@ export function registerConnectionHandlers(
 
     if (qr) {
       updateStatus('qr');
-      if (config.autoDisplayQR) {
+      
+      // Determine QR format from config
+      const qrConfig = config.qrCode || {};
+      const format: QRFormat = qrConfig.format || (config.autoDisplayQR !== false ? 'terminal' : 'raw');
+      
+      // Print to terminal if format includes terminal
+      if (format === 'terminal' || format === 'all') {
         console.log(`\n[${sessionId}] Scan this QR code to login:\n`);
-        qrcode.generate(qr, { small: true });
+        qrcodeTerminal.generate(qr, { small: true });
+      }
+      
+      // Generate base64 if format includes base64
+      let qrBase64: string | undefined;
+      if (format === 'base64' || format === 'all') {
+        qrBase64 = await generateQRBase64(qr, {
+          width: qrConfig.width,
+          margin: qrConfig.margin,
+          darkColor: qrConfig.darkColor,
+          lightColor: qrConfig.lightColor,
+        });
       }
 
       emit(WacapEventType.QR_CODE, {
         state: update as any,
         qr,
+        qrBase64,
       });
     }
 

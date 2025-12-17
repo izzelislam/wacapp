@@ -10,6 +10,31 @@ import type {
 } from '@whiskeysockets/baileys';
 
 /**
+ * QR Code format options
+ */
+export type QRFormat = 'terminal' | 'base64' | 'raw' | 'all';
+
+/**
+ * QR Code configuration
+ */
+export interface QRConfig {
+  /** Format output QR: 'terminal' | 'base64' | 'raw' | 'all' (default: 'terminal') */
+  format?: QRFormat;
+  
+  /** Width of QR image in pixels (for base64, default: 300) */
+  width?: number;
+  
+  /** Margin around QR code (default: 2) */
+  margin?: number;
+  
+  /** Dark color (default: '#000000') */
+  darkColor?: string;
+  
+  /** Light color (default: '#ffffff') */
+  lightColor?: string;
+}
+
+/**
  * Configuration options for the WhatsApp wrapper
  */
 export interface WacapConfig {
@@ -30,8 +55,11 @@ export interface WacapConfig {
   /** Custom Prisma client instance (only if storageAdapter is 'prisma') */
   prismaClient?: any;
   
-  /** Automatically handle QR code display */
+  /** Automatically handle QR code display (deprecated, use qrCode.format instead) */
   autoDisplayQR?: boolean;
+  
+  /** QR Code configuration */
+  qrCode?: QRConfig;
   
   /** Browser configuration */
   browser?: [string, string, string];
@@ -181,6 +209,7 @@ export interface BaseEventData {
 export interface ConnectionEventData extends BaseEventData {
   state: ConnectionState;
   qr?: string;
+  qrBase64?: string;
   error?: any;
 }
 

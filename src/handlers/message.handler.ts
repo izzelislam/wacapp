@@ -58,6 +58,12 @@ function getMessageBody(message: any): string | undefined {
     messageContent.imageMessage?.caption ||
     messageContent.videoMessage?.caption ||
     messageContent.documentMessage?.caption ||
+    messageContent.buttonsResponseMessage?.selectedButtonId ||
+    messageContent.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    messageContent.templateButtonReplyMessage?.selectedId ||
+    messageContent.interactiveResponseMessage?.body?.text ||
+    messageContent.editedMessage?.message?.protocolMessage?.editedMessage?.conversation ||
+    messageContent.editedMessage?.message?.protocolMessage?.editedMessage?.extendedTextMessage?.text ||
     undefined
   );
 }

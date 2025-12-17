@@ -55,6 +55,16 @@ export class SessionRegistry {
     this.sessions.delete(sessionId);
   }
 
+  /**
+   * Logout and destroy a session (removes credentials)
+   */
+  async logout(sessionId: string): Promise<void> {
+    const s = this.sessions.get(sessionId);
+    if (!s) return;
+    await s.logout();
+    this.sessions.delete(sessionId);
+  }
+
   async shutdownAll(): Promise<void> {
     for (const [id, s] of this.sessions) {
       await s.stop();

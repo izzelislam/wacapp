@@ -19,6 +19,40 @@ import {
   createGroup,
   updateGroupParticipants,
   getSessionOrThrow,
+  // New features
+  checkNumberStatus,
+  checkNumbersStatus,
+  getProfilePicture,
+  getContactInfo,
+  sendLocation,
+  sendContact,
+  sendContacts,
+  sendReaction,
+  removeReaction,
+  sendPoll,
+  sendButtons,
+  sendList,
+  markAsRead,
+  sendPresence,
+  getGroupInfo,
+  updateGroupSubject,
+  updateGroupDescription,
+  updateGroupSettings,
+  leaveGroup,
+  getGroupInviteCode,
+  revokeGroupInviteCode,
+  joinGroupViaCode,
+  blockContact,
+  unblockContact,
+  updateProfileStatus,
+  updateProfileName,
+  archiveChat,
+  muteChat,
+  pinChat,
+  starMessage,
+  deleteMessage,
+  forwardMessage,
+  getBusinessProfile,
 } from '../handlers/wrapper.helpers';
 
 /**
@@ -47,6 +81,55 @@ export class WacapWrapper {
         fileName?: string;
       }
     ) => Promise<any>;
+    location: (
+      sessionId: string,
+      jid: string,
+      latitude: number,
+      longitude: number,
+      options?: { name?: string; address?: string }
+    ) => Promise<any>;
+    contact: (
+      sessionId: string,
+      jid: string,
+      contact: { name: string; phone: string }
+    ) => Promise<any>;
+    contacts: (
+      sessionId: string,
+      jid: string,
+      contacts: Array<{ name: string; phone: string }>
+    ) => Promise<any>;
+    reaction: (
+      sessionId: string,
+      jid: string,
+      messageId: string,
+      emoji: string
+    ) => Promise<any>;
+    poll: (
+      sessionId: string,
+      jid: string,
+      name: string,
+      options: string[],
+      selectableCount?: number
+    ) => Promise<any>;
+    buttons: (
+      sessionId: string,
+      jid: string,
+      text: string,
+      buttons: Array<{ id: string; text: string }>,
+      footer?: string
+    ) => Promise<any>;
+    list: (
+      sessionId: string,
+      jid: string,
+      title: string,
+      text: string,
+      buttonText: string,
+      sections: Array<{
+        title: string;
+        rows: Array<{ id: string; title: string; description?: string }>;
+      }>,
+      footer?: string
+    ) => Promise<any>;
   };
   public groups: {
     create: (sessionId: string, subject: string, participants: string[]) => Promise<any>;
@@ -54,6 +137,39 @@ export class WacapWrapper {
     removeParticipants: (sessionId: string, groupId: string, participants: string[]) => Promise<any>;
     promoteParticipants: (sessionId: string, groupId: string, participants: string[]) => Promise<any>;
     demoteParticipants: (sessionId: string, groupId: string, participants: string[]) => Promise<any>;
+    getInfo: (sessionId: string, groupId: string) => Promise<any>;
+    updateSubject: (sessionId: string, groupId: string, subject: string) => Promise<void>;
+    updateDescription: (sessionId: string, groupId: string, description: string) => Promise<void>;
+    updateSettings: (sessionId: string, groupId: string, setting: 'announcement' | 'not_announcement' | 'locked' | 'unlocked') => Promise<void>;
+    leave: (sessionId: string, groupId: string) => Promise<void>;
+    getInviteCode: (sessionId: string, groupId: string) => Promise<string>;
+    revokeInviteCode: (sessionId: string, groupId: string) => Promise<string>;
+    joinViaCode: (sessionId: string, inviteCode: string) => Promise<string>;
+  };
+  public contacts: {
+    check: (sessionId: string, phoneNumber: string) => Promise<{ exists: boolean; jid: string }>;
+    checkMultiple: (sessionId: string, phoneNumbers: string[]) => Promise<Array<{ number: string; exists: boolean; jid: string }>>;
+    getProfilePicture: (sessionId: string, jid: string, highRes?: boolean) => Promise<string | null>;
+    getInfo: (sessionId: string, jid: string) => Promise<any>;
+    block: (sessionId: string, jid: string) => Promise<void>;
+    unblock: (sessionId: string, jid: string) => Promise<void>;
+    getBusinessProfile: (sessionId: string, jid: string) => Promise<any>;
+  };
+  public chat: {
+    markAsRead: (sessionId: string, jid: string, messageIds: string[]) => Promise<void>;
+    archive: (sessionId: string, jid: string, archive?: boolean) => Promise<void>;
+    mute: (sessionId: string, jid: string, muteEndTime: number | null) => Promise<void>;
+    pin: (sessionId: string, jid: string, pin?: boolean) => Promise<void>;
+    deleteMessage: (sessionId: string, jid: string, messageId: string, forEveryone?: boolean) => Promise<void>;
+    starMessage: (sessionId: string, jid: string, messageId: string, star?: boolean) => Promise<void>;
+    forwardMessage: (sessionId: string, jid: string, message: any, forceForward?: boolean) => Promise<any>;
+  };
+  public profile: {
+    updateStatus: (sessionId: string, status: string) => Promise<void>;
+    updateName: (sessionId: string, name: string) => Promise<void>;
+  };
+  public presence: {
+    update: (sessionId: string, jid: string | null, presence: 'available' | 'unavailable' | 'composing' | 'recording' | 'paused') => Promise<void>;
   };
   public sessions: {
     start: (sessionId: string, customConfig?: Partial<WacapConfig>) => Promise<Session>;
@@ -75,6 +191,7 @@ export class WacapWrapper {
       logger: config.logger || { level: 'warn' },
       prismaClient: config.prismaClient,
       autoDisplayQR: config.autoDisplayQR !== false,
+      qrCode: config.qrCode || { format: 'terminal' },
       browser: config.browser || ['Wacap', 'Chrome', '1.0.0'],
       connectionTimeout: config.connectionTimeout || 60000,
       maxRetries: config.maxRetries || 5,
@@ -99,6 +216,20 @@ export class WacapWrapper {
     this.send = {
       text: this.sendMessage.bind(this),
       media: this.sendMedia.bind(this),
+      location: (sessionId, jid, latitude, longitude, options) =>
+        sendLocation(this.registry, sessionId, jid, latitude, longitude, options),
+      contact: (sessionId, jid, contact) =>
+        sendContact(this.registry, sessionId, jid, contact),
+      contacts: (sessionId, jid, contacts) =>
+        sendContacts(this.registry, sessionId, jid, contacts),
+      reaction: (sessionId, jid, messageId, emoji) =>
+        sendReaction(this.registry, sessionId, jid, messageId, emoji),
+      poll: (sessionId, jid, name, options, selectableCount = 1) =>
+        sendPoll(this.registry, sessionId, jid, name, options, selectableCount),
+      buttons: (sessionId, jid, text, buttons, footer) =>
+        sendButtons(this.registry, sessionId, jid, text, buttons, footer),
+      list: (sessionId, jid, title, text, buttonText, sections, footer) =>
+        sendList(this.registry, sessionId, jid, title, text, buttonText, sections, footer),
     };
 
     this.sessions = {
@@ -124,6 +255,68 @@ export class WacapWrapper {
         updateGroupParticipants(this.registry, sessionId, groupId, participants, 'promote'),
       demoteParticipants: (sessionId, groupId, participants) =>
         updateGroupParticipants(this.registry, sessionId, groupId, participants, 'demote'),
+      getInfo: (sessionId, groupId) =>
+        getGroupInfo(this.registry, sessionId, groupId),
+      updateSubject: (sessionId, groupId, subject) =>
+        updateGroupSubject(this.registry, sessionId, groupId, subject),
+      updateDescription: (sessionId, groupId, description) =>
+        updateGroupDescription(this.registry, sessionId, groupId, description),
+      updateSettings: (sessionId, groupId, setting) =>
+        updateGroupSettings(this.registry, sessionId, groupId, setting),
+      leave: (sessionId, groupId) =>
+        leaveGroup(this.registry, sessionId, groupId),
+      getInviteCode: (sessionId, groupId) =>
+        getGroupInviteCode(this.registry, sessionId, groupId),
+      revokeInviteCode: (sessionId, groupId) =>
+        revokeGroupInviteCode(this.registry, sessionId, groupId),
+      joinViaCode: (sessionId, inviteCode) =>
+        joinGroupViaCode(this.registry, sessionId, inviteCode),
+    };
+
+    this.contacts = {
+      check: (sessionId, phoneNumber) =>
+        checkNumberStatus(this.registry, sessionId, phoneNumber),
+      checkMultiple: (sessionId, phoneNumbers) =>
+        checkNumbersStatus(this.registry, sessionId, phoneNumbers),
+      getProfilePicture: (sessionId, jid, highRes = true) =>
+        getProfilePicture(this.registry, sessionId, jid, highRes),
+      getInfo: (sessionId, jid) =>
+        getContactInfo(this.registry, sessionId, jid),
+      block: (sessionId, jid) =>
+        blockContact(this.registry, sessionId, jid),
+      unblock: (sessionId, jid) =>
+        unblockContact(this.registry, sessionId, jid),
+      getBusinessProfile: (sessionId, jid) =>
+        getBusinessProfile(this.registry, sessionId, jid),
+    };
+
+    this.chat = {
+      markAsRead: (sessionId, jid, messageIds) =>
+        markAsRead(this.registry, sessionId, jid, messageIds),
+      archive: (sessionId, jid, archive = true) =>
+        archiveChat(this.registry, sessionId, jid, archive),
+      mute: (sessionId, jid, muteEndTime) =>
+        muteChat(this.registry, sessionId, jid, muteEndTime),
+      pin: (sessionId, jid, pin = true) =>
+        pinChat(this.registry, sessionId, jid, pin),
+      deleteMessage: (sessionId, jid, messageId, forEveryone = false) =>
+        deleteMessage(this.registry, sessionId, jid, messageId, forEveryone),
+      starMessage: (sessionId, jid, messageId, star = true) =>
+        starMessage(this.registry, sessionId, jid, messageId, star),
+      forwardMessage: (sessionId, jid, message, forceForward = false) =>
+        forwardMessage(this.registry, sessionId, jid, message, forceForward),
+    };
+
+    this.profile = {
+      updateStatus: (sessionId, status) =>
+        updateProfileStatus(this.registry, sessionId, status),
+      updateName: (sessionId, name) =>
+        updateProfileName(this.registry, sessionId, name),
+    };
+
+    this.presence = {
+      update: (sessionId, jid, presence) =>
+        sendPresence(this.registry, sessionId, jid, presence),
     };
   }
 
@@ -264,16 +457,25 @@ export class WacapWrapper {
   }
 
   /**
-   * Delete session data from storage
+   * Delete session data from storage (logout from WhatsApp)
    */
   async deleteSession(sessionId: string): Promise<void> {
-    // Stop session if active
+    // Logout session if active (this will logout from WhatsApp)
     if (this.registry.has(sessionId)) {
-      await this.sessionStop(sessionId);
+      await this.registry.logout(sessionId);
     }
 
     // Delete from storage
     await this.storageAdapter.deleteSession(sessionId);
+  }
+
+  /**
+   * Logout a session from WhatsApp (removes credentials, requires new QR scan)
+   */
+  async logoutSession(sessionId: string): Promise<void> {
+    if (this.registry.has(sessionId)) {
+      await this.registry.logout(sessionId);
+    }
   }
 
   /**

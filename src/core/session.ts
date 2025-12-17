@@ -72,6 +72,7 @@ export class Session {
       logger: config.logger || { level: 'warn' },
       prismaClient: config.prismaClient,
       autoDisplayQR: config.autoDisplayQR !== false,
+      qrCode: config.qrCode || { format: 'terminal' },
       browser: config.browser || ['Wacap', 'Chrome', '1.0.0'],
       connectionTimeout: config.connectionTimeout || 60000,
       maxRetries: config.maxRetries || 5,
@@ -287,7 +288,8 @@ export class Session {
   }
 
   /**
-   * Stop the session
+   * Stop the session without logging out (preserves credentials)
+   * Use this for server restart/shutdown
    */
   async stop(): Promise<void> {
     this.shouldReconnect = false;
@@ -295,7 +297,34 @@ export class Session {
 
     if (this.socket) {
       this.cleanupSocketListeners();
-      await this.socket.logout();
+      // Hanya disconnect, TIDAK logout - credentials tetap tersimpan
+      this.socket.end(undefined);
+      this.socket = null;
+    }
+
+    this.updateStatus('disconnected');
+
+    this.emitBoth(WacapEventType.SESSION_STOP, {
+      sessionId: this.sessionId,
+      timestamp: new Date(),
+    });
+  }
+
+  /**
+   * Logout and stop the session (removes credentials)
+   * Use this to completely remove a session
+   */
+  async logout(): Promise<void> {
+    this.shouldReconnect = false;
+    this.retryCount = 0;
+
+    if (this.socket) {
+      this.cleanupSocketListeners();
+      try {
+        await this.socket.logout();
+      } catch (err) {
+        // Ignore logout errors
+      }
       this.socket = null;
     }
 

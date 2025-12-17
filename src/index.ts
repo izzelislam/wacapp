@@ -10,6 +10,9 @@ export { SessionRegistry } from './core/session-registry';
 // Storage adapters
 export { SQLiteStorageAdapter, PrismaStorageAdapter } from './storage';
 
+// Utilities
+export { formatJid, formatJids } from './handlers/wrapper.helpers';
+
 // Types
 export * from './types';
 

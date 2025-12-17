@@ -23,3 +23,5 @@ sessions/
 # Other
 n8n-workflow/*
 docker-image/*
+docker-app/*
+.kiro/*

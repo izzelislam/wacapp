@@ -14,19 +14,32 @@ type MediaPayload = {
 /**
  * Format nomor telepon atau group ID ke JID WhatsApp
  * 
- * @param input - Nomor telepon, group ID, atau JID lengkap
- * @param isGroup - Apakah ini group (default: auto-detect)
- * @returns JID yang sudah diformat
+ * Sangat fleksibel - menerima berbagai format input:
  * 
- * @example
- * formatJid('08123456789') // '628123456789@s.whatsapp.net'
- * formatJid('628123456789') // '628123456789@s.whatsapp.net'
- * formatJid('+62 812-3456-789') // '628123456789@s.whatsapp.net'
- * formatJid('628123456789@s.whatsapp.net') // '628123456789@s.whatsapp.net' (unchanged)
- * formatJid('123456789', true) // '123456789@g.us'
- * formatJid('123456789@g.us') // '123456789@g.us' (unchanged)
+ * PHONE NUMBERS:
+ * - '08123456789' -> '628123456789@s.whatsapp.net'
+ * - '628123456789' -> '628123456789@s.whatsapp.net'
+ * - '+62 812-3456-789' -> '628123456789@s.whatsapp.net'
+ * - '628123456789@s.whatsapp.net' -> unchanged
+ * 
+ * GROUPS:
+ * - '123456789-1234567890' -> '123456789-1234567890@g.us' (auto-detect)
+ * - '120363xxx@g.us' -> unchanged
+ * - formatJid('123456789', true) -> '123456789@g.us'
+ * 
+ * LINKED ID (LID):
+ * - '188630735790116@lid' -> unchanged
+ * - '188630735790116' with isLid=true -> '188630735790116@lid'
+ * 
+ * BROADCAST:
+ * - 'status@broadcast' -> unchanged
+ * 
+ * @param input - Nomor telepon, group ID, LID, atau JID lengkap
+ * @param isGroup - Force sebagai group (default: auto-detect)
+ * @param isLid - Force sebagai LID (default: false)
+ * @returns JID yang sudah diformat
  */
-export function formatJid(input: string, isGroup?: boolean): string {
+export function formatJid(input: string, isGroup?: boolean, isLid?: boolean): string {
   if (!input) {
     throw new Error('JID/nomor tidak boleh kosong');
   }
@@ -34,27 +47,42 @@ export function formatJid(input: string, isGroup?: boolean): string {
   // Trim whitespace
   let cleaned = input.trim();
 
-  // Jika sudah format JID lengkap, return langsung
-  // Support: @s.whatsapp.net, @g.us, @lid (Linked ID), @broadcast
-  if (
-    cleaned.endsWith('@s.whatsapp.net') ||
-    cleaned.endsWith('@g.us') ||
-    cleaned.endsWith('@lid') ||
-    cleaned.endsWith('@broadcast')
-  ) {
-    return cleaned;
+  // === PRIORITY 1: Already has WhatsApp suffix - return as-is ===
+  if (cleaned.endsWith('@s.whatsapp.net')) return cleaned;
+  if (cleaned.endsWith('@g.us')) return cleaned;
+  if (cleaned.endsWith('@lid')) return cleaned;
+  if (cleaned.endsWith('@broadcast')) return cleaned;
+
+  // === PRIORITY 2: Explicit type specified ===
+  
+  // Force as LID
+  if (isLid === true) {
+    // Remove any non-digit characters for LID
+    const lidId = cleaned.replace(/\D/g, '');
+    return `${lidId}@lid`;
   }
 
-  // Auto-detect group jika mengandung '-' di tengah (format group ID WhatsApp)
-  // Group ID biasanya format: 123456789-1234567890
-  const looksLikeGroup = isGroup ?? /^\d+-\d+$/.test(cleaned);
-
-  if (looksLikeGroup) {
+  // Force as group
+  if (isGroup === true) {
     return `${cleaned}@g.us`;
   }
 
-  // Format nomor telepon
-  // Hapus semua karakter non-digit
+  // === PRIORITY 3: Auto-detect by pattern ===
+
+  // Auto-detect group: contains '-' in middle (format: 123456789-1234567890)
+  if (/^\d+-\d+$/.test(cleaned)) {
+    return `${cleaned}@g.us`;
+  }
+
+  // Auto-detect group: very long number (18+ digits) that starts with 120363
+  // Group IDs typically start with 120363
+  if (/^120363\d{12,}$/.test(cleaned)) {
+    return `${cleaned}@g.us`;
+  }
+
+  // === PRIORITY 4: Format as phone number ===
+  
+  // Remove all non-digit characters
   cleaned = cleaned.replace(/\D/g, '');
 
   // Handle format Indonesia
@@ -66,14 +94,55 @@ export function formatJid(input: string, isGroup?: boolean): string {
     cleaned = '62' + cleaned;
   }
 
+  // Validate phone number length (10-15 digits per E.164)
+  if (cleaned.length < 10 || cleaned.length > 15) {
+    // If it's a very long number (15+ digits) and not a valid phone, 
+    // it might be a LID or group ID - return as-is with @s.whatsapp.net
+    // The API will handle the error if it's invalid
+    console.warn(`[formatJid] Unusual number length: ${cleaned.length} digits`);
+  }
+
   return `${cleaned}@s.whatsapp.net`;
+}
+
+/**
+ * Smart format JID - tries to determine the best format automatically
+ * Use this when you're not sure what type of JID you have
+ */
+export function smartFormatJid(input: string): string {
+  if (!input) {
+    throw new Error('JID/nomor tidak boleh kosong');
+  }
+
+  const cleaned = input.trim();
+
+  // Already formatted
+  if (cleaned.includes('@')) {
+    return cleaned;
+  }
+
+  // Contains hyphen - likely group
+  if (cleaned.includes('-')) {
+    return formatJid(cleaned, true);
+  }
+
+  // Very long number starting with 120363 - likely group
+  if (/^120363\d{12,}$/.test(cleaned)) {
+    return formatJid(cleaned, true);
+  }
+
+  // 15-18 digit number not starting with country code - might be LID
+  // But we can't be sure, so format as phone and let API handle it
+  
+  // Default: format as phone number
+  return formatJid(cleaned);
 }
 
 /**
  * Format array of JIDs
  */
-export function formatJids(inputs: string[], isGroup?: boolean): string[] {
-  return inputs.map(input => formatJid(input, isGroup));
+export function formatJids(inputs: string[], isGroup?: boolean, isLid?: boolean): string[] {
+  return inputs.map(input => formatJid(input, isGroup, isLid));
 }
 
 /**
@@ -138,16 +207,18 @@ function buildMediaContent(media: MediaPayload): Record<string, any> {
   const mimetype = media.mimetype || '';
 
   if (mimetype.startsWith('image/')) {
-    content.image = media.url || media.buffer;
+    content.image = media.url ? { url: media.url } : media.buffer;
+    content.mimetype = mimetype;
     if (media.caption) content.caption = media.caption;
   } else if (mimetype.startsWith('video/')) {
-    content.video = media.url || media.buffer;
+    content.video = media.url ? { url: media.url } : media.buffer;
+    content.mimetype = mimetype;
     if (media.caption) content.caption = media.caption;
   } else if (mimetype.startsWith('audio/')) {
-    content.audio = media.url || media.buffer;
+    content.audio = media.url ? { url: media.url } : media.buffer;
     content.mimetype = mimetype;
   } else {
-    content.document = media.url || media.buffer;
+    content.document = media.url ? { url: media.url } : media.buffer;
     content.mimetype = mimetype;
     if (media.fileName) content.fileName = media.fileName;
     if (media.caption) content.caption = media.caption;

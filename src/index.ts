@@ -11,7 +11,7 @@ export { SessionRegistry } from './core/session-registry';
 export { SQLiteStorageAdapter, PrismaStorageAdapter } from './storage';
 
 // Utilities
-export { formatJid, formatJids } from './handlers/wrapper.helpers';
+export { formatJid, formatJids, smartFormatJid } from './handlers/wrapper.helpers';
 
 // Types
 export * from './types';

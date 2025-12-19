@@ -223,6 +223,14 @@ export interface MessageEventData extends BaseEventData {
   body?: string;
   from?: string;
   to?: string;
+  /** JID to use for replying (handles LID conversion) */
+  replyTo?: string;
+  /** Extracted phone number if available */
+  phoneNumber?: string | null;
+  /** Whether the sender is using Linked ID */
+  isLid?: boolean;
+  /** Participant JID (for groups) */
+  participant?: string | null;
 }
 
 /**

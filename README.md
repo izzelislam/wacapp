@@ -4,6 +4,34 @@ Comprehensive TypeScript wrapper for [Baileys WhatsApp Web API](https://github.c
 
 [<img src="https://www.owlstown.com/assets/icons/bmc-yellow-button-941f96a1.png" alt="Buy Me A Coffee" width="150" />](https://www.buymeacoffee.com/pakor)
 
+## 🐳 Docker Image Available!
+
+For production deployment with REST API, WebSocket, and n8n integration:
+
+**Docker Hub:** [bangfkr/wacap](https://hub.docker.com/repository/docker/bangfkr/wacap/general)
+
+```bash
+docker pull bangfkr/wacap:latest
+```
+
+Quick start with Docker Compose:
+```yaml
+version: '3.8'
+services:
+  wacap:
+    image: bangfkr/wacap:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - JWT_SECRET=your-secret-key
+```
+
+See [docker-image/](./docker-image/) folder for full documentation.
+
+---
+
 ## Features
 
 ✨ **Easy to Use** - Simple, intuitive API for sends, groups, and lifecycle  
@@ -405,6 +433,11 @@ interface WacapConfig {
 
 - [API.md](./API.md) - Full API documentation
 - [examples/API-ENDPOINTS.md](./examples/API-ENDPOINTS.md) - HTTP endpoints
+
+## Related Projects
+
+- **Docker Image**: [bangfkr/wacap](https://hub.docker.com/repository/docker/bangfkr/wacap/general) - Production-ready REST API with WebSocket support
+- **n8n Integration**: See `n8n-workflow/` folder for n8n nodes
 
 ## License
 
